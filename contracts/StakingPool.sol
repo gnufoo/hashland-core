@@ -26,11 +26,12 @@ contract StakingPool is IERC721Receiver, Ownable
 
 	struct Reward
 	{
-		uint256 remainBalance;
+		uint256 rewardBalance;
 		uint256 expiredBlock;
 		uint256 startBlock;
 		uint256 totalBalance;
 		uint256 accRewardPerPower;
+		uint256 lastRewardBlock;
 	}
 
 	uint8 private constant DEFAULT_SLOTS = 2;
@@ -43,7 +44,6 @@ contract StakingPool is IERC721Receiver, Ownable
 	address[] public rewardList;
 
 	uint64 public totalPower;
-	uint256 public lastRewardBlock;
 
 	constructor(address nftAddress)
 	{
@@ -66,22 +66,26 @@ contract StakingPool is IERC721Receiver, Ownable
 	function rewardPerBlock(address token) public view returns(uint256)
 	{
 		Reward memory reward = rewards[token];
-		return reward.remainBalance.div(reward.expiredBlock.sub(reward.startBlock));
+		if(reward.expiredBlock == reward.startBlock)
+		{
+			return 0;
+		}
+		return reward.rewardBalance.div(reward.expiredBlock.sub(reward.startBlock));
 	}
 
 	function _updateReward(address token) internal
 	{
 		Reward memory reward = rewards[token];
-		if(block.number > lastRewardBlock)
+		if(block.number > reward.lastRewardBlock)
 		{
 			if(totalPower > 0)
 			{
-				uint256 blocks = block.number.sub(lastRewardBlock);
+				uint256 blocks = block.number.sub(reward.lastRewardBlock);
 				uint256 profit = blocks.mul(rewardPerBlock(token));
 				reward.accRewardPerPower = reward.accRewardPerPower.add(profit.mul(ACC_REWARD_PRECISION) / totalPower);
 			}
-			lastRewardBlock = block.number;
-			// rewards[token] = reward;
+			reward.lastRewardBlock = block.number;
+			rewards[token] = reward;
 		}
 	}
 
@@ -124,6 +128,41 @@ contract StakingPool is IERC721Receiver, Ownable
 			}
 		}
 		require(false, "ENOTEXIST");
+	}
+
+	function pendingReward(address token, address _user) external view returns (uint256 pending) {
+        Reward memory reward = rewards[token];
+        Staker memory user   = users[_user];
+        
+        uint256 accRewardPerPower = reward.accRewardPerPower;
+
+        if (block.number > reward.lastRewardBlock && totalPower != 0) {
+            uint256 blocks = block.number.sub(reward.lastRewardBlock);
+            uint256 tokenReward = blocks.mul(rewardPerBlock(token));
+            accRewardPerPower = accRewardPerPower.add(tokenReward.mul(ACC_REWARD_PRECISION) / totalPower);
+        }
+        pending = (user.power * accRewardPerPower / ACC_REWARD_PRECISION).sub(user.rewardDebt);
+    }
+
+	function addReward(address token, uint256 amount, uint256 numBlocks) public onlyOwner
+	{
+		require(numBlocks > 0, "EBLOCK");
+		require(amount > 0, "EAMOUNT");
+
+		_updateReward(token);
+
+		Reward memory reward = rewards[token];
+		if(reward.expiredBlock > block.number)
+		{
+			reward.rewardBalance = reward.rewardBalance.mul(reward.expiredBlock.sub(block.number))
+				.div(reward.expiredBlock.sub(reward.startBlock));				
+		}
+
+		reward.rewardBalance = reward.rewardBalance.add(amount);
+		reward.startBlock = block.number;
+		reward.expiredBlock = block.number.add(numBlocks);
+		reward.totalBalance = reward.totalBalance.add(amount);
+		rewards[token] = reward;
 	}
 
 	function deposit(uint256[] calldata stakingNFTs) public

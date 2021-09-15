@@ -67,8 +67,8 @@ contract MiningNFT is ERC721, Ownable, IERC721Receiver
     	return _mintWithLevel(msg.sender, lvl + 1);
     }
 
-    function onERC721Received(address, address, uint256, bytes calldata) public virtual override returns (bytes4)
-    {
-    	return this.onERC721Received.selector;
-    }
+	function onERC721Received(address, address, uint256, bytes calldata) public virtual override returns (bytes4)
+	{
+		return this.onERC721Received.selector;
+	}
 } 
