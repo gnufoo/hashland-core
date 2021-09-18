@@ -18,7 +18,7 @@ function display(bn, decimal = 18, token)
 
 describe("HashLand", function () {
 
-  var theNFT, theToken;
+  var theNFT, theToken, theSlotNFT;
   var deployer, tester1, tester2;
   var pool;
 
@@ -26,6 +26,7 @@ describe("HashLand", function () {
     const NFTContract = await ethers.getContractFactory("MiningNFT");
     const NFTPool = await ethers.getContractFactory("StakingPool");
     const ERC20Token = await ethers.getContractFactory("HashlandToken");
+    const NFTSlotContract = await ethers.getContractFactory("SlotNFT");
 
     // 测试用例中创建三个角色，一个deployer是部署者，tester1和tester2分别是两个测试账号
     [deployer, tester1, tester2] = await ethers.getSigners();
@@ -33,16 +34,21 @@ describe("HashLand", function () {
     // 首先部署NFT合约
     theNFT = await NFTContract.connect(deployer).deploy();
 
+    // 部署一个卡槽NFT合约
+    theSlotNFT = await NFTSlotContract.connect(deployer).deploy();
+
     // 接着部署质押挖矿合约
-    pool = await NFTPool.connect(deployer).deploy(theNFT.address);
+    pool = await NFTPool.connect(deployer).deploy(theNFT.address, theSlotNFT.address);
 
     // 再发一个HASHLAND的平台币
     theToken = await ERC20Token.connect(deployer).deploy();
+    
 
     // 等待这三个合约在链上部署完成
     await theNFT.deployed();
     await pool.deployed();
     await theToken.deployed();
+    await theSlotNFT.deployed();
 
     // 给tester1发一个等级为1的NFT卡牌
     await theNFT.mint(tester1.address, 1);
@@ -82,6 +88,7 @@ describe("HashLand", function () {
     // 把刚刚的2级卡牌质押进矿池合约
     await pool.connect(tester1).deposit([5]);
 
+    await theToken.connect(deployer).approve(pool.address, ethers.utils.parseUnits("100", 18));
     // 给矿池里面打100个平台币，并且约定10个块产完
     await pool.connect(deployer).addReward(theToken.address, ethers.utils.parseUnits("100", 18), 10);
 
@@ -89,10 +96,35 @@ describe("HashLand", function () {
     await mineBlocks(5);
 
     // 看看我身上可以领的金额是多少
-    display(await pool.pendingReward(theToken.address, tester1.address));
+    console.log('Pending Reward: ', ethers.utils.formatUnits((await pool.pendingReward(theToken.address, tester1.address)), 18));
 
     // 把我身上已经质押的2级卡取出来
     await pool.connect(tester1).withdraw([5]);
 
+    console.log('Balance before harvest:', ethers.utils.formatUnits((await theToken.balanceOf(tester1.address)), 18));
+    await pool.connect(tester1).harvestAll(tester1.address);
+    console.log('Balance after harvest:', ethers.utils.formatUnits((await theToken.balanceOf(tester1.address)), 18));
+    console.log('Pending Reward: ', ethers.utils.formatUnits((await pool.pendingReward(theToken.address, tester1.address)), 18));
+  });
+
+  it("Slot Increase", async function() {
+    expect(await theNFT.balanceOf(tester1.address)).to.equal("1");
+    expect(await theNFT.ownerOf(5)).to.equal(tester1.address);
+
+    await theNFT.mint(tester1.address, 1);
+    await theNFT.mint(tester1.address, 1);
+
+    expect(await theNFT.balanceOf(tester1.address)).to.equal("3");
+    await pool.connect(tester1).deposit([5, 6]);
+    await expect(pool.connect(tester1).deposit([7])).to.be.revertedWith('ESLOT');
+
+    await theSlotNFT.mint(tester1.address);
+    await theSlotNFT.connect(tester1).setApprovalForAll(pool.address, true);
+
+    await pool.connect(tester1).increaseSlot(1);
+    await pool.connect(tester1).deposit([7]);
+    // await pool.connect(tester1).deposit([7]);
+
+    console.log(ethers.utils.formatUnits((await pool.users(tester1.address)).power, 0));
   });
 });

@@ -3,24 +3,29 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol"; 
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/utils/math/SignedSafeMath.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "hardhat/console.sol";
 import "./MiningNFT.sol";
 
-contract StakingPool is IERC721Receiver, Ownable
+contract StakingPool is IERC721Receiver, Ownable, ReentrancyGuard
 {
 	using SafeMath for uint;
 	using SafeMath for uint256;
+	using SignedSafeMath for int256;
 
 	address public nftAsset;
+	address public slotAsset;
 
 	struct Staker
 	{
 		uint8 numSlots;
 		uint8 numAvailableSlots;
-		uint32 power;
-		uint256 rewardDebt;
+		uint256 power;
+		int256 rewardDebt;
 		uint256 [] stakedAssets;
 	}
 
@@ -35,19 +40,21 @@ contract StakingPool is IERC721Receiver, Ownable
 	}
 
 	uint8 private constant DEFAULT_SLOTS = 2;
+	uint8 private constant MAX_SLOTS = 4;
 	uint256 private constant ACC_REWARD_PRECISION = 1e12;
 
 	mapping(address=>Staker) 	public users;
-	mapping(uint8=>uint32) 		public powerAlloc;
+	mapping(uint8=>uint256) 		public powerAlloc;
 	mapping(address=>Reward) 	public rewards;
 
 	address[] public rewardList;
 
-	uint64 public totalPower;
+	uint256 public totalPower;
 
-	constructor(address nftAddress)
+	constructor(address nftAddress, address slotAddress)
 	{
 		nftAsset = nftAddress;
+		slotAsset = slotAddress;
 		powerAlloc[0] = 0;
 		powerAlloc[1] = 100;
 		powerAlloc[2] = 450;
@@ -56,7 +63,7 @@ contract StakingPool is IERC721Receiver, Ownable
 		powerAlloc[5] = 50000;
 	}
 
-	function _nftToPower(uint256 tokenId) internal view returns(uint32)
+	function _nftToPower(uint256 tokenId) internal view returns(uint256)
 	{
 		uint8 level = MiningNFT(nftAsset).tokenLevel(tokenId);
 		require(level > 0 && level < 6, "ELEVEL");
@@ -104,13 +111,13 @@ contract StakingPool is IERC721Receiver, Ownable
 			if(addOrSub)
 			{
 				users[user].rewardDebt = users[user].rewardDebt.add(
-					power.mul(rewards[rewardList[i]].accRewardPerPower) / ACC_REWARD_PRECISION
+					int256(power.mul(rewards[rewardList[i]].accRewardPerPower) / ACC_REWARD_PRECISION)
 				);
 			}
 			else
 			{
 				users[user].rewardDebt = users[user].rewardDebt.sub(
-					power.mul(rewards[rewardList[i]].accRewardPerPower) / ACC_REWARD_PRECISION
+					int256(power.mul(rewards[rewardList[i]].accRewardPerPower) / ACC_REWARD_PRECISION)
 				);
 			}
 		}	
@@ -130,6 +137,24 @@ contract StakingPool is IERC721Receiver, Ownable
 		require(false, "ENOTEXIST");
 	}
 
+	function _checkSlots(address user) internal
+	{
+		if(users[user].numSlots == 0)
+		{
+			users[user].numSlots = DEFAULT_SLOTS;
+			users[user].numAvailableSlots = DEFAULT_SLOTS;
+		}
+
+		console.log("user has %s slots, and %s used slots, and %s availableSlots." 
+			// , user 
+			, uint256(users[user].numSlots)
+			, uint256(users[user].stakedAssets.length)
+			, uint256(users[user].numAvailableSlots)
+		);
+		require(users[user].numAvailableSlots + users[user].stakedAssets.length == users[user].numSlots, "ESLOT");
+		require(users[user].numSlots <= MAX_SLOTS, "EMAXSLOT");
+	}
+
 	function pendingReward(address token, address _user) external view returns (uint256 pending) {
         Reward memory reward = rewards[token];
         Staker memory user   = users[_user];
@@ -141,7 +166,7 @@ contract StakingPool is IERC721Receiver, Ownable
             uint256 tokenReward = blocks.mul(rewardPerBlock(token));
             accRewardPerPower = accRewardPerPower.add(tokenReward.mul(ACC_REWARD_PRECISION) / totalPower);
         }
-        pending = (user.power * accRewardPerPower / ACC_REWARD_PRECISION).sub(user.rewardDebt);
+        pending = uint256(int256(user.power.mul(accRewardPerPower) / ACC_REWARD_PRECISION).sub(user.rewardDebt));
     }
 
 	function addReward(address token, uint256 amount, uint256 numBlocks) public onlyOwner
@@ -150,8 +175,14 @@ contract StakingPool is IERC721Receiver, Ownable
 		require(amount > 0, "EAMOUNT");
 
 		_updateReward(token);
+		IERC20(token).transferFrom(msg.sender, address(this), amount);
 
 		Reward memory reward = rewards[token];
+		if(reward.expiredBlock == 0)
+		{
+			rewardList.push(token);
+		}
+
 		if(reward.expiredBlock > block.number)
 		{
 			reward.rewardBalance = reward.rewardBalance.mul(reward.expiredBlock.sub(block.number))
@@ -165,14 +196,20 @@ contract StakingPool is IERC721Receiver, Ownable
 		rewards[token] = reward;
 	}
 
-	function deposit(uint256[] calldata stakingNFTs) public
+	function increaseSlot(uint256 slotTokenId) public nonReentrant
 	{
-		// if it's a new user to deposit
-		if(users[msg.sender].numSlots == 0)
-		{
-			users[msg.sender].numSlots = DEFAULT_SLOTS;
-			users[msg.sender].numAvailableSlots = DEFAULT_SLOTS;
-		}
+		require(IERC721(slotAsset).ownerOf(slotTokenId) == msg.sender, "ENOTEXIST");
+		IERC721(slotAsset).safeTransferFrom(msg.sender, address(this), slotTokenId);
+
+		_checkSlots(msg.sender);
+		users[msg.sender].numSlots += 1;
+		users[msg.sender].numAvailableSlots += 1;
+		_checkSlots(msg.sender);
+	}
+
+	function deposit(uint256[] calldata stakingNFTs) public nonReentrant
+	{
+		_checkSlots(msg.sender);
 
 		require(stakingNFTs.length > 0, "EARRAY");
 		require(users[msg.sender].numAvailableSlots >= stakingNFTs.length, "ESLOT");
@@ -181,50 +218,71 @@ contract StakingPool is IERC721Receiver, Ownable
 
 		_updateRewards();
 
-		uint32 accPower = 0;
+		uint256 accPower = 0;
 		for(uint i = 0; i < stakingNFTs.length; i ++)
 		{
 			uint256 tokenId = stakingNFTs[i];
-			uint32 power = _nftToPower(tokenId);
-			require(accPower + power >= accPower, "EOVERFLOW");
-			accPower += power;
+			accPower = accPower.add(_nftToPower(tokenId));
 			users[msg.sender].stakedAssets.push(tokenId);
 			IERC721(nftAsset).safeTransferFrom(msg.sender, address(this), tokenId);
 		}
 
-		require(users[msg.sender].power + accPower >= users[msg.sender].power, "EOVERFLOW");
-		require(totalPower + accPower >= totalPower, "EOVERFLOW");
+		_checkSlots(msg.sender);
 
-		users[msg.sender].power += accPower;
-		totalPower += accPower;
+		users[msg.sender].power = users[msg.sender].power.add(accPower);
+		totalPower = totalPower.add(accPower);
+
 		_updateUserDebt(msg.sender, accPower, true);
 	}
 
-	function withdraw(uint256[] calldata stakingNFTs) public
+	function withdraw(uint256[] calldata stakingNFTs) public nonReentrant
 	{
 		require(stakingNFTs.length > 0, "EARRAY");
 		require(users[msg.sender].numSlots - users[msg.sender].numAvailableSlots >= uint8(stakingNFTs.length), "ESLOT");
 
+		users[msg.sender].numAvailableSlots += uint8(stakingNFTs.length);
+
 		_updateRewards();
 
-		uint32 accPower = 0;
+		uint256 accPower = 0;
 		for(uint i = 0; i < stakingNFTs.length; i ++)
 		{
 			uint256 tokenId = stakingNFTs[i];
-			uint32 power = _nftToPower(tokenId);
-			require(accPower + power >= accPower, "EOVERFLOW");
-			accPower += power;
+			accPower = accPower.add(_nftToPower(tokenId));
 
 			_arrayRemove(msg.sender, tokenId);
 			IERC721(nftAsset).safeTransferFrom(address(this), msg.sender, tokenId);
 		}
 
-		require(users[msg.sender].power - accPower <= users[msg.sender].power, "EUNDERFLOW");
-		require(totalPower - accPower <= totalPower, "EUNDERFLOW");
+		_checkSlots(msg.sender);
 
-		users[msg.sender].power -= accPower;
-		totalPower -= accPower;
+		users[msg.sender].power = users[msg.sender].power.sub(accPower);
+		totalPower = totalPower.sub(accPower);
+		
 		_updateUserDebt(msg.sender, accPower, false);
+	}
+
+	function harvestAll(address to) public
+	{
+		for(uint i = 0; i < rewardList.length; i ++)
+		{
+			address token = rewardList[i];
+
+			_updateReward(token);
+
+			Reward memory reward = rewards[token];
+			Staker storage user   = users[msg.sender];
+
+			int256 accReward = int256(user.power.mul(reward.accRewardPerPower) / ACC_REWARD_PRECISION);
+			uint256 _pendingReward = uint256(accReward.sub(user.rewardDebt));
+			console.log("pending harvest reward is: %d", _pendingReward);
+			user.rewardDebt = accReward;
+
+			if(_pendingReward > 0)
+			{
+				IERC20(token).transfer(to, _pendingReward);
+			}
+		}
 	}
 
 	function onERC721Received(address, address, uint256, bytes calldata) public virtual override returns (bytes4)
