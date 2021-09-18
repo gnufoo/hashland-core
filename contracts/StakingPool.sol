@@ -155,19 +155,20 @@ contract StakingPool is IERC721Receiver, Ownable, ReentrancyGuard
 		require(users[user].numSlots <= MAX_SLOTS, "EMAXSLOT");
 	}
 
-	function pendingReward(address token, address _user) external view returns (uint256 pending) {
-        Reward memory reward = rewards[token];
-        Staker memory user   = users[_user];
-        
-        uint256 accRewardPerPower = reward.accRewardPerPower;
+	function pendingReward(address token, address _user) external view returns (uint256 pending) 
+	{
+		Reward memory reward = rewards[token];
+		Staker memory user   = users[_user];
 
-        if (block.number > reward.lastRewardBlock && totalPower != 0) {
-            uint256 blocks = block.number.sub(reward.lastRewardBlock);
-            uint256 tokenReward = blocks.mul(rewardPerBlock(token));
-            accRewardPerPower = accRewardPerPower.add(tokenReward.mul(ACC_REWARD_PRECISION) / totalPower);
-        }
-        pending = uint256(int256(user.power.mul(accRewardPerPower) / ACC_REWARD_PRECISION).sub(user.rewardDebt));
-    }
+		uint256 accRewardPerPower = reward.accRewardPerPower;
+
+		if (block.number > reward.lastRewardBlock && totalPower != 0) {
+			uint256 blocks = block.number.sub(reward.lastRewardBlock);
+			uint256 tokenReward = blocks.mul(rewardPerBlock(token));
+			accRewardPerPower = accRewardPerPower.add(tokenReward.mul(ACC_REWARD_PRECISION) / totalPower);
+		}
+		pending = uint256(int256(user.power.mul(accRewardPerPower) / ACC_REWARD_PRECISION).sub(user.rewardDebt));
+	}
 
 	function addReward(address token, uint256 amount, uint256 numBlocks) public onlyOwner
 	{
@@ -286,7 +287,7 @@ contract StakingPool is IERC721Receiver, Ownable, ReentrancyGuard
 	}
 
 	function onERC721Received(address, address, uint256, bytes calldata) public virtual override returns (bytes4)
-    {
-    	return this.onERC721Received.selector;
-    }
+	{
+		return this.onERC721Received.selector;
+	}
 }
