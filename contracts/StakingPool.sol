@@ -165,9 +165,11 @@ contract StakingPool is IERC721Receiver, Ownable, ReentrancyGuard
 		Staker memory user   = users[_user];
 
 		uint256 accRewardPerPower = reward.accRewardPerPower;
+		uint256 startBlock = Math.max(reward.lastRewardBlock, reward.startBlock);
+		uint256 endBlock = Math.min(reward.expiredBlock, block.number);
 
-		if (block.number > reward.lastRewardBlock && totalPower != 0) {
-			uint256 blocks = block.number.sub(reward.lastRewardBlock);
+		if (endBlock > startBlock && totalPower != 0) {
+			uint256 blocks = endBlock.sub(startBlock);
 			uint256 tokenReward = blocks.mul(rewardPerBlock(token));
 			accRewardPerPower = accRewardPerPower.add(tokenReward.mul(ACC_REWARD_PRECISION) / totalPower);
 		}
