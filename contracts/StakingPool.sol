@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol"; 
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/math/SignedSafeMath.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "hardhat/console.sol";
@@ -83,15 +84,18 @@ contract StakingPool is IERC721Receiver, Ownable, ReentrancyGuard
 	function _updateReward(address token) internal
 	{
 		Reward memory reward = rewards[token];
-		if(block.number > reward.lastRewardBlock)
+		uint256 startBlock = Math.max(reward.lastRewardBlock, reward.startBlock);
+		uint256 endBlock = Math.min(reward.expiredBlock, block.number);
+
+		if(endBlock > startBlock)
 		{
 			if(totalPower > 0)
 			{
-				uint256 blocks = block.number.sub(reward.lastRewardBlock);
+				uint256 blocks = endBlock.sub(startBlock);
 				uint256 profit = blocks.mul(rewardPerBlock(token));
 				reward.accRewardPerPower = reward.accRewardPerPower.add(profit.mul(ACC_REWARD_PRECISION) / totalPower);
 			}
-			reward.lastRewardBlock = block.number;
+			reward.lastRewardBlock = endBlock;
 			rewards[token] = reward;
 		}
 	}

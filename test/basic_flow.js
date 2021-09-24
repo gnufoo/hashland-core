@@ -93,7 +93,7 @@ describe("HashLand", function () {
     await pool.connect(deployer).addReward(theToken.address, ethers.utils.parseUnits("100", 18), 10);
 
     // 过去了5个块
-    await mineBlocks(5);
+    await mineBlocks(20);
 
     // 看看我身上可以领的金额是多少
     console.log('Pending Reward: ', ethers.utils.formatUnits((await pool.pendingReward(theToken.address, tester1.address)), 18));
