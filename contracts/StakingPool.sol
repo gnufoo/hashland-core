@@ -26,7 +26,7 @@ contract StakingPool is IERC721Receiver, Ownable, ReentrancyGuard
 		uint8 numSlots;
 		uint8 numAvailableSlots;
 		uint256 power;
-		int256 rewardDebt;
+		mapping(address=>int256) rewardDebt;
 		uint256 [] stakedAssets;
 	}
 
@@ -45,7 +45,7 @@ contract StakingPool is IERC721Receiver, Ownable, ReentrancyGuard
 	uint256 private constant ACC_REWARD_PRECISION = 1e12;
 
 	mapping(address=>Staker) 	public users;
-	mapping(uint8=>uint256) 		public powerAlloc;
+	mapping(uint8=>uint256) 	public powerAlloc;
 	mapping(address=>Reward) 	public rewards;
 
 	address[] public rewardList;
@@ -112,16 +112,17 @@ contract StakingPool is IERC721Receiver, Ownable, ReentrancyGuard
 	{
 		for(uint i = 0; i < rewardList.length; i ++)
 		{
+			Reward memory reward = rewards[rewardList[i]];
 			if(addOrSub)
 			{
-				users[user].rewardDebt = users[user].rewardDebt.add(
-					int256(power.mul(rewards[rewardList[i]].accRewardPerPower) / ACC_REWARD_PRECISION)
+				users[user].rewardDebt[rewardList[i]] = users[user].rewardDebt[rewardList[i]].add(
+					int256(power.mul(reward.accRewardPerPower) / ACC_REWARD_PRECISION)
 				);
 			}
 			else
 			{
-				users[user].rewardDebt = users[user].rewardDebt.sub(
-					int256(power.mul(rewards[rewardList[i]].accRewardPerPower) / ACC_REWARD_PRECISION)
+				users[user].rewardDebt[rewardList[i]] = users[user].rewardDebt[rewardList[i]].sub(
+					int256(power.mul(reward.accRewardPerPower) / ACC_REWARD_PRECISION)
 				);
 			}
 		}	
@@ -162,7 +163,7 @@ contract StakingPool is IERC721Receiver, Ownable, ReentrancyGuard
 	function pendingReward(address token, address _user) external view returns (uint256 pending) 
 	{
 		Reward memory reward = rewards[token];
-		Staker memory user   = users[_user];
+		Staker storage user   = users[_user];
 
 		uint256 accRewardPerPower = reward.accRewardPerPower;
 		uint256 startBlock = Math.max(reward.lastRewardBlock, reward.startBlock);
@@ -173,7 +174,7 @@ contract StakingPool is IERC721Receiver, Ownable, ReentrancyGuard
 			uint256 tokenReward = blocks.mul(rewardPerBlock(token));
 			accRewardPerPower = accRewardPerPower.add(tokenReward.mul(ACC_REWARD_PRECISION) / totalPower);
 		}
-		pending = uint256(int256(user.power.mul(accRewardPerPower) / ACC_REWARD_PRECISION).sub(user.rewardDebt));
+		pending = uint256(int256(user.power.mul(accRewardPerPower) / ACC_REWARD_PRECISION).sub(user.rewardDebt[token]));
 	}
 
 	function addReward(address token, uint256 amount, uint256 numBlocks) public onlyOwner
@@ -281,9 +282,9 @@ contract StakingPool is IERC721Receiver, Ownable, ReentrancyGuard
 			Staker storage user   = users[msg.sender];
 
 			int256 accReward = int256(user.power.mul(reward.accRewardPerPower) / ACC_REWARD_PRECISION);
-			uint256 _pendingReward = uint256(accReward.sub(user.rewardDebt));
+			uint256 _pendingReward = uint256(accReward.sub(user.rewardDebt[token]));
 			console.log("pending harvest reward is: %d", _pendingReward);
-			user.rewardDebt = accReward;
+			user.rewardDebt[token] = accReward;
 
 			if(_pendingReward > 0)
 			{

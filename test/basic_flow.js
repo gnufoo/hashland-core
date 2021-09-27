@@ -68,7 +68,6 @@ describe("HashLand", function () {
     await theNFT.mint(tester1.address, 1);
     await theNFT.mint(tester1.address, 1);
     await theNFT.mint(tester1.address, 1);
-    await theNFT.mint(tester2.address, 1);
 
     // tokenId分别是1,2,3,4，实际开发中，要从graph node里面来获取具体的tokenId，然后通过前端选择来传这个参数
     const tokenIds = [1, 2, 3, 4];
@@ -77,7 +76,7 @@ describe("HashLand", function () {
     await theNFT.connect(tester1).upgrade(tokenIds);
 
     // 确保升级完了之后，获得一个id为5的新NFT，级别为2
-    expect(await theNFT.tokenLevel(6)).to.equal(2);
+    expect(await theNFT.tokenLevel(5)).to.equal(2);
     // 确保身上的4张1级卡都被销毁了 
     expect(await theNFT.balanceOf(tester1.address)).to.equal("1");
   });
@@ -85,53 +84,45 @@ describe("HashLand", function () {
   it("NFT Mining", async function(){
     // 测试挖矿以及收益
     await theNFT.connect(tester1).setApprovalForAll(pool.address, true);
-    await theNFT.connect(tester2).setApprovalForAll(pool.address, true);
 
     // 把刚刚的2级卡牌质押进矿池合约
-    // await pool.connect(tester1).deposit([6]);
+    await pool.connect(tester1).deposit([5]);
 
     await theToken.connect(deployer).approve(pool.address, ethers.utils.parseUnits("100", 18));
     // 给矿池里面打100个平台币，并且约定10个块产完
     await pool.connect(deployer).addReward(theToken.address, ethers.utils.parseUnits("100", 18), 10);
 
-    // 过去了20个块
-    await mineBlocks(20);
+    // 过去了5个块
+    await mineBlocks(5);
 
-    await pool.connect(tester1).deposit([6]);
-    await pool.connect(tester2).deposit([5]);
-    await pool.connect(tester1).withdraw([6]);
-    console.log('Balance before harvest:', ethers.utils.formatUnits((await theToken.balanceOf(tester2.address)), 18));
-    await pool.connect(tester2).harvestAll(tester2.address);
-    console.log('Balance after harvest:', ethers.utils.formatUnits((await theToken.balanceOf(tester2.address)), 18));
+    // 看看我身上可以领的金额是多少
+    console.log('Pending Reward: ', ethers.utils.formatUnits((await pool.pendingReward(theToken.address, tester1.address)), 18));
 
-    // // 看看我身上可以领的金额是多少
-    // console.log('Pending Reward: ', ethers.utils.formatUnits((await pool.pendingReward(theToken.address, tester1.address)), 18));
+    // 把我身上已经质押的2级卡取出来
+    await pool.connect(tester1).withdraw([5]);
 
-    // // 把我身上已经质押的2级卡取出来
-    // await pool.connect(tester1).withdraw([5]);
-
-    // console.log('Balance before harvest:', ethers.utils.formatUnits((await theToken.balanceOf(tester1.address)), 18));
-    // await pool.connect(tester1).harvestAll(tester1.address);
-    // console.log('Balance after harvest:', ethers.utils.formatUnits((await theToken.balanceOf(tester1.address)), 18));
-    // console.log('Pending Reward: ', ethers.utils.formatUnits((await pool.pendingReward(theToken.address, tester1.address)), 18));
+    console.log('Balance before harvest:', ethers.utils.formatUnits((await theToken.balanceOf(tester1.address)), 18));
+    await pool.connect(tester1).harvestAll(tester1.address);
+    console.log('Balance after harvest:', ethers.utils.formatUnits((await theToken.balanceOf(tester1.address)), 18));
+    console.log('Pending Reward: ', ethers.utils.formatUnits((await pool.pendingReward(theToken.address, tester1.address)), 18));
   });
 
   it("Slot Increase", async function() {
     expect(await theNFT.balanceOf(tester1.address)).to.equal("1");
-    expect(await theNFT.ownerOf(6)).to.equal(tester1.address);
+    expect(await theNFT.ownerOf(5)).to.equal(tester1.address);
 
     await theNFT.mint(tester1.address, 1);
     await theNFT.mint(tester1.address, 1);
 
     expect(await theNFT.balanceOf(tester1.address)).to.equal("3");
-    await pool.connect(tester1).deposit([6, 7]);
-    await expect(pool.connect(tester1).deposit([8])).to.be.revertedWith('ESLOT');
+    await pool.connect(tester1).deposit([5, 6]);
+    await expect(pool.connect(tester1).deposit([7])).to.be.revertedWith('ESLOT');
 
     await theSlotNFT.mint(tester1.address);
     await theSlotNFT.connect(tester1).setApprovalForAll(pool.address, true);
 
     await pool.connect(tester1).increaseSlot(1);
-    await pool.connect(tester1).deposit([8]);
+    await pool.connect(tester1).deposit([7]);
     // await pool.connect(tester1).deposit([7]);
 
     console.log(ethers.utils.formatUnits((await pool.users(tester1.address)).power, 0));
